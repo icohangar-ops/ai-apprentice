@@ -1,14 +1,10 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
-import path from "path";
+import { readAgentCache, writeAgentCache, type AgentCache } from "./agent-cache";
 import { FIELD_PROMPT } from "./agent-prompt";
 import { redact } from "./utils";
 
-const CACHE_PATH = path.join(process.cwd(), ".data", "elevenlabs.json");
 const AGENT_NAME = "Northline Apprentice";
 const TOOL_NAME = "lookup_guardrail";
 const PERMIT_TOOL_NAME = "search_permits";
-
-type Cache = { agent_id: string; tool_id: string; permit_tool_id?: string };
 
 export function elevenLabsConfigured(): boolean {
   return Boolean(process.env.ELEVENLABS_API_KEY?.trim());
@@ -27,27 +23,6 @@ async function el(pathname: string, init?: RequestInit): Promise<Response> {
     headers.set("Content-Type", "application/json");
   }
   return fetch(`https://api.elevenlabs.io${pathname}`, { ...init, headers });
-}
-
-async function readCache(): Promise<Cache | null> {
-  try {
-    const parsed = JSON.parse(await readFile(CACHE_PATH, "utf8")) as Partial<Cache>;
-    if (parsed.agent_id && parsed.tool_id) {
-      return {
-        agent_id: parsed.agent_id,
-        tool_id: parsed.tool_id,
-        permit_tool_id: parsed.permit_tool_id,
-      };
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-async function writeCache(cache: Cache): Promise<void> {
-  await mkdir(path.dirname(CACHE_PATH), { recursive: true });
-  await writeFile(CACHE_PATH, JSON.stringify(cache), "utf8");
 }
 
 async function createPermitTool(): Promise<string> {
@@ -200,18 +175,18 @@ async function findExistingAgent(): Promise<string | null> {
   return match?.agent_id ?? null;
 }
 
-let pending: Promise<Cache> | null = null;
+let pending: Promise<AgentCache> | null = null;
 
-export async function ensureAgent(): Promise<Cache> {
+export async function ensureAgent(): Promise<AgentCache> {
   if (!pending) {
     pending = (async () => {
-      const cached = await readCache();
+      const cached = await readAgentCache();
       const toolId = cached?.tool_id ?? (await createTool());
       const agentId = cached?.agent_id ?? ((await findExistingAgent()) ?? (await createAgent(toolId)));
       const permitToolId = cached?.permit_tool_id ?? (await createPermitTool());
       await attachTool(agentId, permitToolId);
       const finalCache = { agent_id: agentId, tool_id: toolId, permit_tool_id: permitToolId };
-      await writeCache(finalCache);
+      await writeAgentCache(finalCache);
       return finalCache;
     })().catch((error) => {
       pending = null;
