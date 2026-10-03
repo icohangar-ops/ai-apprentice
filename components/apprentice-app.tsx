@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useVoice, VoiceProvider } from "@/components/voice-provider";
+import { loadSaveReview } from "@/lib/jev/browser";
+import { buildTicketState, decideSave, withJevReason } from "@/lib/jev/ticket";
+import type { JevSaveReading } from "@/lib/jev/types";
 import { lookupGuardrail } from "@/lib/guardrails";
 import { CAPTURE_JOB, emptyScreen, SAMPLE_NOTE, TEACH_JOB } from "@/lib/jobs";
 import {
@@ -69,6 +72,7 @@ function Shell() {
     held: false,
   });
   const [block, setBlock] = useState<BlockState>(null);
+  const [jevNotice, setJevNotice] = useState<JevSaveReading | null>(null);
   const [sideAnswer, setSideAnswer] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const firedRef = useRef<string | null>(null);
@@ -313,6 +317,7 @@ function Shell() {
   async function startTeach() {
     const brief = onRecordBrief(lines, name);
     setBlock(null);
+    setJevNotice(null);
     setSideAnswer(null);
     setTeachScreen({
       photos: { plate: true, install: true, discharge: true },
@@ -327,32 +332,72 @@ function Shell() {
   }
 
   async function judgeSave(action: "save" | "hold") {
-    const verdict = evaluateNewHire({
+    const local = evaluateNewHire({
       action,
       note: teachScreen.note,
       discharge: TEACH_JOB.discharge,
       hasPlate: teachScreen.photos.plate,
     });
-    if (!verdict.ok) {
-      const payload = await voice.lookup(verdict.code, "tutor");
+    let jev: JevSaveReading | null = null;
+    let permitSpoken = "";
+    if (action === "save") {
       const permit = await voice.searchPermits(TEACH_JOB.address, "tutor");
-      const permitLine = permit.spoken ? ` ${permit.spoken}` : "";
-      const spoken = `${explainBlock({
-        reason: verdict.reason,
-        code: verdict.code,
-        expertName: name,
-        answers,
-        guardrail: payload.result
-          ? {
-              code: payload.result.code ?? verdict.code,
-              title: payload.result.title ?? "",
-              rule: payload.result.rule ?? "",
-              topic: verdict.reason,
-            }
-          : lookupGuardrail(verdict.code),
-        lines,
-      })}${permitLine}`;
-      setBlock({ spoken, code: verdict.code });
+      permitSpoken = permit.spoken ? ` ${permit.spoken}` : "";
+      const hit = permit.hits[0];
+      jev = await loadSaveReview(
+        buildTicketState({
+          job: TEACH_JOB.code,
+          address: TEACH_JOB.address,
+          unit: TEACH_JOB.unit,
+          equipment: TEACH_JOB.equipment,
+          note: teachScreen.note,
+          discharge: TEACH_JOB.discharge,
+          hasPlate: teachScreen.photos.plate,
+          hasInstall: teachScreen.photos.install,
+          pdfRequested: true,
+          permitNumber: hit?.permitNumber,
+          permitType: hit?.permitType,
+          permitStatus: hit?.status,
+        }),
+      );
+    }
+    const outcome = decideSave({ local, jev });
+    const visible = jev && (jev.source === "jev" || jev.error) ? jev : null;
+    setJevNotice(visible);
+    if (!outcome.save) {
+      if (!local.ok) {
+        const payload = await voice.lookup(local.code, "tutor");
+        const permitLine =
+          action === "save"
+            ? permitSpoken
+            : await voice.searchPermits(TEACH_JOB.address, "tutor").then((permit) =>
+                permit.spoken ? ` ${permit.spoken}` : "",
+              );
+        const spoken = withJevReason(
+          `${explainBlock({
+            reason: local.reason,
+            code: local.code,
+            expertName: name,
+            answers,
+            guardrail: payload.result
+              ? {
+                  code: payload.result.code ?? local.code,
+                  title: payload.result.title ?? "",
+                  rule: payload.result.rule ?? "",
+                  topic: local.reason,
+                }
+              : lookupGuardrail(local.code),
+            lines,
+          })}${permitLine}`,
+          visible,
+        );
+        setBlock({ spoken, code: local.code });
+        setTeachScreen((prev) => ({ ...prev, saved: false }));
+        voice.cue(spoken);
+        return;
+      }
+      const spoken = withJevReason("Stop. Nothing was sent.", visible);
+      setBlock({ spoken, code: "Jev" });
       setTeachScreen((prev) => ({ ...prev, saved: false }));
       voice.cue(spoken);
       return;
@@ -364,7 +409,12 @@ function Shell() {
       return;
     }
     setTeachScreen((prev) => ({ ...prev, saved: true, pdfOpen: true }));
-    voice.cue("That one can go. The discharge is acceptable, the plate is there, and the note has no phone number.");
+    voice.cue(
+      withJevReason(
+        "That one can go. The discharge is acceptable, the plate is there, and the note has no phone number.",
+        visible,
+      ),
+    );
   }
 
   function askSide() {
@@ -395,6 +445,7 @@ function Shell() {
     setTeachConfirmed(false);
     setSelectedNodeId(null);
     setBlock(null);
+    setJevNotice(null);
     setSideAnswer(null);
     setTeachScreen({
       photos: { plate: true, install: true, discharge: true },
@@ -717,6 +768,18 @@ function Shell() {
                 <div className="rounded-xl border border-stamp/40 bg-card p-4">
                   <p className="text-xs uppercase tracking-wide text-stamp">Not saved · {block.code}</p>
                   <p className="mt-2 text-sm leading-relaxed">{block.spoken}</p>
+                </div>
+              ) : null}
+              {jevNotice?.reason ? (
+                <div className="rounded-xl border border-line bg-card p-4" data-testid="jev-decision">
+                  <p className="text-xs uppercase tracking-wide text-stamp">Jev · {jevNotice.choice}</p>
+                  <p className="mt-2 text-sm leading-relaxed">{jevNotice.reason}</p>
+                </div>
+              ) : null}
+              {jevNotice?.error ? (
+                <div className="rounded-xl border border-line bg-card p-4" data-testid="jev-decision">
+                  <p className="text-xs uppercase tracking-wide text-muted">Jev</p>
+                  <p className="mt-2 text-sm leading-relaxed">{jevNotice.error}</p>
                 </div>
               ) : null}
             </div>

@@ -32,13 +32,19 @@ Permit search runs on the server. Put `ALGOLIA_APP_ID`, `ALGOLIA_SEARCH_KEY`, an
 
 If the live session cannot start (microphone blocked, for example), scripted lines fall back to ElevenLabs text-to-speech and the screen says so. If no key is set, the same pause → question → debrief → tutor loop runs in **demo mode** with browser speech. Typing an answer always works.
 
+## Jev
+
+Before **Save and send PDF**, the server can ask Jev (TypeSafe System One) one text Choice: allow or hold. The call posts the written ticket to `https://thejevai.com/v1/systemone`. It does not see photos, and it does not replace Algolia permit search or the ElevenLabs voice.
+
+Put `JEV_API_KEY` in `.env` (see `.env.example`). Leave it empty and the save path stays on the local guardrails. A hold from Jev is shown on the teach screen and blocks the save. An allow does not override GR-11, GR-07, or GR-04. If the call fails, the screen says Jev did not answer and the local rule still decides.
+
 The app decides *when* to ask, so the agent stays quiet while you type or hold the talk button. `sendUserActivity` tells the live agent you are still typing.
 
 ## Judge path
 
 1. **Capture.** Start the closeout for WO-1842 (Maya Chen, fictional). Capture the data plate, the finished install, and the T&P discharge. Write a note or insert the sample. Preview the branded PDF. After each pause the apprentice asks. One of those questions is the discharge guardrail. Use your own words or "Use the sample answer." The status line should say it is staying quiet while you type.
 2. **Map.** Answer the three debrief questions. They were not asked during the closeout. Search the permit index for Harbor Lane and cite the hit. Optionally hold the sample aside off the record. Confirm the teach-back. Open any step or guardrail. You should see the screen as it was and the expert's words. Off-the-record wording is stamped and kept out of the tutor.
-3. **Teach.** This is WO-2218, a gas heater the expert never closed. The discharge photo runs uphill. The permit search is already looking at Pike Street. Click **Save and send PDF**. The save does not go through. The tutor looks up **GR-11**, cites the permit hit, and explains with the expert's on-record words. Then ask whether you can text the PDF from a personal phone. That answer must not repeat anything you held off the record. **Leave the job open** is the call the expert taught.
+3. **Teach.** This is WO-2218, a gas heater the expert never closed. The discharge photo runs uphill. The permit search is already looking at Pike Street. Click **Save and send PDF**. The save does not go through. The tutor looks up **GR-11**, cites the expired permit hit, and explains with the expert's on-record words. If `JEV_API_KEY` is set, the same screen shows Jev's allow or hold as the reason. Then ask whether you can text the PDF from a personal phone. That answer must not repeat anything you held off the record. **Leave the job open** is the call the expert taught.
 
 A second wrong path: paste the customer phone into the note and save. That is **GR-07**, blocked before send.
 
